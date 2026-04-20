@@ -1,0 +1,20 @@
+node_modules
+dist
+dist-ssr
+.vite
+
+# 편집기/OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# 로그
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 환경
+.env
+.env.local
+.env.*.local
