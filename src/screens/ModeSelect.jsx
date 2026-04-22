@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { MODES } from '../config/modes.js';
 
-export default function ModeSelect({ onStart, onGoSetup }) {
+export default function ModeSelect({ onStart }) {
   const [selectedId, setSelectedId] = useState(null);
   const [topic, setTopic] = useState('');
 
@@ -58,12 +58,6 @@ export default function ModeSelect({ onStart, onGoSetup }) {
       <div className="field">
         <button className="btn" onClick={handleStart} disabled={!canStart}>
           대화 시작
-        </button>
-      </div>
-
-      <div className="field" style={{ textAlign: 'center' }}>
-        <button className="btn btn-ghost" onClick={onGoSetup}>
-          API 키 변경
         </button>
       </div>
     </div>

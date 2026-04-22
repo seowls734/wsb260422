@@ -1,13 +1,12 @@
-// Google Gemini (Generative Language API v1beta) 호출 모듈.
+// Google Gemini (Generative Language API v1beta) 호출 모듈 (Cloudflare Worker 경유).
 // - 모델 폴백: gemini-2.5-flash → gemini-1.5-flash
 // - 2.5-flash에는 googleSearch grounding 활성화(실시간 검색 내장).
 //   1.5-flash는 tools 스키마가 다르므로(googleSearchRetrieval) 단순화를 위해 tools 제외.
-// - API 키는 URL 쿼리스트링으로 전달(표준)
 // - 503/429 에러는 자동 재시도(2→4→8초, 최대 3회). 404 등은 즉시 다음 모델로 폴백.
 
 import { withRetry } from './retry.js';
+import { requireWorkerUrl } from './apiBase.js';
 
-const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const MODEL_FALLBACK_CHAIN = [
   'gemini-2.5-flash-lite',
   'gemini-1.5-flash',
@@ -16,17 +15,12 @@ const MAX_OUTPUT_TOKENS = 400;
 
 /**
  * Gemini에게 응답을 요청합니다.
- * @param {string} apiKey
  * @param {string} systemPrompt
  * @param {Array<{speaker: 'gpt'|'gemini'|'user', text: string}>} history
  * @param {{ onRetry?: Function }} [options]
  * @returns {Promise<string>}
  */
-export async function callGemini(apiKey, systemPrompt, history, options = {}) {
-  if (!apiKey) {
-    throw new Error('Gemini API 키가 설정되어 있지 않습니다.');
-  }
-
+export async function callGemini(systemPrompt, history, options = {}) {
   // 대화 이력 변환: self(gemini)=model, 그 외('user'/'gpt')=user
   const contents = history.map((m) => ({
     role: m.speaker === 'gemini' ? 'model' : 'user',
@@ -55,7 +49,7 @@ export async function callGemini(apiKey, systemPrompt, history, options = {}) {
   for (const model of MODEL_FALLBACK_CHAIN) {
     const body = buildBody(model, systemPrompt, contents);
     try {
-      return await withRetry(() => callGeminiModel(model, apiKey, body), {
+      return await withRetry(() => callGeminiModel(model, body), {
         onRetry: options.onRetry,
       });
     } catch (err) {
@@ -85,8 +79,8 @@ function buildBody(model, systemPrompt, contents) {
   return body;
 }
 
-async function callGeminiModel(model, apiKey, body) {
-  const url = `${GEMINI_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+async function callGeminiModel(model, body) {
+  const url = `${requireWorkerUrl()}/gemini/${encodeURIComponent(model)}`;
 
   let response;
   try {

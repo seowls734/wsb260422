@@ -27,6 +27,7 @@ jobs:
       - name: Build
         env:
           BASE_PATH: /wsb260422/
+          VITE_WORKER_URL: ${{ secrets.WORKER_URL }}
         run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

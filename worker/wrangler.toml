@@ -1,0 +1,8 @@
+name = "wsb260422-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# 시크릿은 커밋하지 않습니다. 아래 명령으로 각각 설정:
+#   npx wrangler secret put OPENAI_API_KEY
+#   npx wrangler secret put GEMINI_API_KEY
+#   npx wrangler secret put TAVILY_API_KEY   (선택)
