@@ -5,7 +5,10 @@ import { VitePWA } from 'vite-plugin-pwa';
 // Vite + React + PWA 설정
 // - vite-plugin-pwa가 manifest.webmanifest와 service worker를 자동 생성합니다.
 // - registerType: 'autoUpdate' → 새 버전 감지 시 자동으로 SW 업데이트.
+const base = process.env.BASE_PATH || '/';
+
 export default defineConfig({
+  base,
   plugins: [
     react(),
     VitePWA({
@@ -23,23 +26,23 @@ export default defineConfig({
         background_color: '#ffffff',
         display: 'standalone',
         orientation: 'portrait',
-        start_url: '/',
-        scope: '/',
+        start_url: base,
+        scope: base,
         lang: 'ko',
         icons: [
           {
-            src: '/icon-192.png',
+            src: `${base}icon-192.png`,
             sizes: '192x192',
             type: 'image/png',
           },
           {
-            src: '/icon-512.png',
+            src: `${base}icon-512.png`,
             sizes: '512x512',
             type: 'image/png',
           },
           {
             // maskable 용도로도 같은 아이콘 재사용(단색이라 안전)
-            src: '/icon-512.png',
+            src: `${base}icon-512.png`,
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any maskable',
@@ -50,7 +53,7 @@ export default defineConfig({
         // 기본 2MB 한도를 5MB로 여유있게
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // SPA 탐색 fallback
-        navigateFallback: '/index.html',
+        navigateFallback: `${base}index.html`,
       },
     }),
   ],
