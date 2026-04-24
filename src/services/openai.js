@@ -1,26 +1,31 @@
-// OpenAI Chat Completions API 호출 모듈 (Cloudflare Worker 경유).
+// OpenAI Chat Completions API 호출 모듈.
 // - 모델 폴백: gpt-4.1-mini → gpt-4o-mini (4.1-mini가 계정에서 접근 불가할 때 대비)
 // - max_tokens: 400
-// - web_search 도구 활성화(Worker의 /tavily 경유)
+// - Tavily 키가 있으면 web_search 함수 도구 활성화(function calling 루프)
 // - 503/429 에러는 자동 재시도(라운드별로 독립 withRetry).
 
 import { withRetry } from './retry.js';
 import { tavilySearch } from './tavily.js';
-import { requireWorkerUrl } from './apiBase.js';
 
+const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const MODEL_FALLBACK_CHAIN = ['gpt-4.1-mini', 'gpt-4o-mini'];
 const MAX_TOKENS = 400;
 const MAX_TOOL_ROUNDS = 3; // tool_call 무한 루프 가드
 
 /**
  * GPT에게 응답을 요청합니다.
+ * @param {string} apiKey - OpenAI API 키 (sk-...)
  * @param {string} systemPrompt - 시스템 프롬프트
  * @param {Array<{speaker: 'gpt'|'gemini'|'user', text: string}>} history - 지금까지의 대화 이력
- * @param {{ onRetry?: Function }} [options]
- * @returns {Promise<string>} - GPT의 최종 응답 텍스트
+ * @param {{ onRetry?: Function, tavilyKey?: string }} [options]
+ * @returns {Promise<{text: string, usedSearch: boolean, sources: Array<{title?: string, url: string}>}>}
  */
-export async function callGPT(systemPrompt, history, options = {}) {
-  const { onRetry } = options;
+export async function callGPT(apiKey, systemPrompt, history, options = {}) {
+  if (!apiKey) {
+    throw new Error('OpenAI API 키가 설정되어 있지 않습니다.');
+  }
+
+  const { onRetry, tavilyKey } = options;
 
   // 1) 초기 messages 빌드
   // role 매핑: self(gpt)=assistant, 그 외('user'/'gemini')=user
@@ -36,8 +41,8 @@ export async function callGPT(systemPrompt, history, options = {}) {
     messages.push({ role: 'user', content: '대화를 시작하거나 이어가주세요.' });
   }
 
-  // 2) tools 정의 (항상 활성 — 키는 Worker가 보유)
-  const tools = buildTools();
+  // 2) tools 정의 (Tavily 키 있을 때만)
+  const tools = tavilyKey ? buildTools() : undefined;
 
   // 3) 모델 폴백 루프: 각 모델에 대해 tool_call 루프 실행
   let lastErr;
@@ -45,8 +50,10 @@ export async function callGPT(systemPrompt, history, options = {}) {
     try {
       return await runToolLoop({
         model,
+        apiKey,
         messages,
         tools,
+        tavilyKey,
         onRetry,
       });
     } catch (err) {
@@ -63,14 +70,17 @@ export async function callGPT(systemPrompt, history, options = {}) {
 // ─────────────────────────────────────────────────────────────
 // function calling 루프
 // ─────────────────────────────────────────────────────────────
-async function runToolLoop({ model, messages, tools, onRetry }) {
+async function runToolLoop({ model, apiKey, messages, tools, tavilyKey, onRetry }) {
   // messages는 이 함수 내에서만 계속 push하므로 원본 보호를 위해 얕은 복사
   const workingMessages = [...messages];
+  // 검색 사용 여부 및 누적 소스
+  let usedSearch = false;
+  const collectedSources = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     // 라운드별 독립 withRetry — 재시도 시 앞서 쌓인 tool 결과가 날아가지 않음
     const data = await withRetry(
-      () => doRequestRaw(model, workingMessages, tools),
+      () => doRequestRaw(model, apiKey, workingMessages, tools),
       { onRetry },
     );
 
@@ -87,7 +97,11 @@ async function runToolLoop({ model, messages, tools, onRetry }) {
       if (!text) {
         throw new Error('OpenAI 응답이 비어 있습니다.');
       }
-      return text;
+      return {
+        text,
+        usedSearch,
+        sources: dedupeSources(collectedSources).slice(0, 5),
+      };
     }
 
     // 3b) tool_calls 있으면: assistant 메시지 + 각 호출 실행 결과 push
@@ -98,11 +112,17 @@ async function runToolLoop({ model, messages, tools, onRetry }) {
     });
 
     for (const tc of toolCalls) {
-      const result = await executeToolCall(tc);
+      const { content, sources } = await executeToolCall(tc, tavilyKey);
+      if (tc?.function?.name === 'web_search') {
+        usedSearch = true;
+      }
+      if (sources?.length) {
+        collectedSources.push(...sources);
+      }
       workingMessages.push({
         role: 'tool',
         tool_call_id: tc.id,
-        content: result,
+        content,
       });
     }
     // 다음 라운드로
@@ -111,18 +131,47 @@ async function runToolLoop({ model, messages, tools, onRetry }) {
   throw new Error('OpenAI 도구 호출 루프 최대 횟수 초과');
 }
 
-async function executeToolCall(toolCall) {
+async function executeToolCall(toolCall, tavilyKey) {
   const name = toolCall?.function?.name;
   if (name === 'web_search') {
     let args = {};
     try {
       args = JSON.parse(toolCall.function.arguments || '{}');
     } catch {
-      return JSON.stringify({ error: '인자 파싱 실패' });
+      return { content: JSON.stringify({ error: '인자 파싱 실패' }), sources: [] };
     }
-    return tavilySearch(args.query || '');
+    const content = await tavilySearch(tavilyKey, args.query || '');
+    // Tavily 결과에서 {title, url} 뽑아내기 (실패/에러는 무시)
+    const sources = extractSourcesFromTavily(content);
+    return { content, sources };
   }
-  return JSON.stringify({ error: `알 수 없는 도구: ${name}` });
+  return {
+    content: JSON.stringify({ error: `알 수 없는 도구: ${name}` }),
+    sources: [],
+  };
+}
+
+function extractSourcesFromTavily(jsonStr) {
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (!parsed || !Array.isArray(parsed.results)) return [];
+    return parsed.results
+      .filter((r) => r && r.url)
+      .map((r) => ({ title: r.title || undefined, url: r.url }));
+  } catch {
+    return [];
+  }
+}
+
+function dedupeSources(sources) {
+  const seen = new Set();
+  const out = [];
+  for (const s of sources) {
+    if (!s?.url || seen.has(s.url)) continue;
+    seen.add(s.url);
+    out.push(s);
+  }
+  return out;
 }
 
 function buildTools() {
@@ -151,7 +200,7 @@ function buildTools() {
 // ─────────────────────────────────────────────────────────────
 // 하위 API 호출 (원본 응답 반환)
 // ─────────────────────────────────────────────────────────────
-async function doRequestRaw(model, messages, tools) {
+async function doRequestRaw(model, apiKey, messages, tools) {
   const body = {
     model,
     messages,
@@ -164,9 +213,12 @@ async function doRequestRaw(model, messages, tools) {
 
   let response;
   try {
-    response = await fetch(`${requireWorkerUrl()}/openai`, {
+    response = await fetch(OPENAI_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify(body),
     });
   } catch (networkErr) {
