@@ -20,7 +20,7 @@ const MAX_OUTPUT_TOKENS = 400;
  * @param {string} systemPrompt
  * @param {Array<{speaker: 'gpt'|'gemini'|'user', text: string}>} history
  * @param {{ onRetry?: Function }} [options]
- * @returns {Promise<string>}
+ * @returns {Promise<{text: string, usedSearch: boolean, sources: Array<{title?: string, url: string}>}>}
  */
 export async function callGemini(apiKey, systemPrompt, history, options = {}) {
   if (!apiKey) {
@@ -118,7 +118,29 @@ async function callGeminiModel(model, apiKey, body) {
     const reason = candidate?.finishReason || 'unknown';
     throw new Error(`Gemini 응답이 비어 있습니다 (finishReason: ${reason}).`);
   }
-  return text.trim();
+
+  // 그라운딩 메타데이터에서 검색 사용 여부 + 소스 추출
+  const grounding = candidate?.groundingMetadata;
+  const chunks = grounding?.groundingChunks || [];
+  const rawSources = chunks
+    .map((c) => c?.web)
+    .filter((w) => w && w.uri)
+    .map((w) => ({ title: w.title || undefined, url: w.uri }));
+  const sources = dedupeSources(rawSources).slice(0, 5);
+  const usedSearch = sources.length > 0 || (grounding?.webSearchQueries?.length || 0) > 0;
+
+  return { text: text.trim(), usedSearch, sources };
+}
+
+function dedupeSources(sources) {
+  const seen = new Set();
+  const out = [];
+  for (const s of sources) {
+    if (!s?.url || seen.has(s.url)) continue;
+    seen.add(s.url);
+    out.push(s);
+  }
+  return out;
 }
 
 function isModelUnavailableError(err) {

@@ -95,16 +95,24 @@ export default function Chat({ config, onBack }) {
       setPendingSpeaker('gpt');
       const gptSys = buildSystemPrompt(mode, topic, 'gpt');
       const historyForGpt = [...messagesRef.current, userMsg];
-      let gptText;
+      let gptResult;
       try {
-        gptText = await callGPT(openai, gptSys, historyForGpt, {
+        gptResult = await callGPT(openai, gptSys, historyForGpt, {
           onRetry: makeRetryHandler('gpt'),
           tavilyKey: tavily || null,
         });
       } finally {
         clearRetryStatus('gpt');
       }
-      setMessages((prev) => [...prev, { speaker: 'gpt', text: gptText }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          speaker: 'gpt',
+          text: gptResult.text,
+          usedSearch: gptResult.usedSearch,
+          sources: gptResult.sources,
+        },
+      ]);
 
       // 3) 턴 사이 딜레이
       setPendingSpeaker(null);
@@ -114,15 +122,23 @@ export default function Chat({ config, onBack }) {
       setPendingSpeaker('gemini');
       const geminiSys = buildSystemPrompt(mode, topic, 'gemini');
       const historyForGemini = messagesRef.current;
-      let geminiText;
+      let geminiResult;
       try {
-        geminiText = await callGemini(gemini, geminiSys, historyForGemini, {
+        geminiResult = await callGemini(gemini, geminiSys, historyForGemini, {
           onRetry: makeRetryHandler('gemini'),
         });
       } finally {
         clearRetryStatus('gemini');
       }
-      setMessages((prev) => [...prev, { speaker: 'gemini', text: geminiText }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          speaker: 'gemini',
+          text: geminiResult.text,
+          usedSearch: geminiResult.usedSearch,
+          sources: geminiResult.sources,
+        },
+      ]);
     } catch (err) {
       // 현재 대기 중인 화자의 자리에 에러 버블
       const speaker = pendingSpeakerRef.current || 'gpt';
@@ -189,7 +205,14 @@ export default function Chat({ config, onBack }) {
         )}
 
         {messages.map((m, i) => (
-          <Bubble key={i} speaker={m.speaker} text={m.text} error={m.error} />
+          <Bubble
+            key={i}
+            speaker={m.speaker}
+            text={m.text}
+            error={m.error}
+            usedSearch={m.usedSearch}
+            sources={m.sources}
+          />
         ))}
 
         {pendingSpeaker && (
@@ -238,17 +261,49 @@ export default function Chat({ config, onBack }) {
   );
 }
 
-function Bubble({ speaker, text, error, loading }) {
+function Bubble({ speaker, text, error, loading, usedSearch, sources }) {
   const labelMap = { gpt: '🟢 GPT', gemini: '🔵 Gemini', user: '🧑 나' };
   const label = labelMap[speaker] || speaker;
   const classes = ['bubble', speaker];
   if (error) classes.push('error');
   if (loading) classes.push('loading');
 
+  const showFooter = !loading && !error && (usedSearch || (sources && sources.length > 0));
+
   return (
     <div className={`bubble-row ${speaker}`}>
       <div className="bubble-label">{label}</div>
       <div className={classes.join(' ')}>{text}</div>
+      {showFooter && (
+        <div className={`bubble-footer ${speaker}`}>
+          {usedSearch && <span className="search-badge">🔍 웹 검색 사용</span>}
+          {sources && sources.length > 0 && (
+            <div className="source-links">
+              {sources.map((s, i) => (
+                <a
+                  key={i}
+                  className="source-link"
+                  href={s.url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  title={s.title || s.url}
+                >
+                  {hostOf(s.url)}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+// URL에서 호스트명만 추출 (실패 시 원본 반환)
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
 }

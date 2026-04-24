@@ -18,7 +18,7 @@ const MAX_TOOL_ROUNDS = 3; // tool_call 무한 루프 가드
  * @param {string} systemPrompt - 시스템 프롬프트
  * @param {Array<{speaker: 'gpt'|'gemini'|'user', text: string}>} history - 지금까지의 대화 이력
  * @param {{ onRetry?: Function, tavilyKey?: string }} [options]
- * @returns {Promise<string>} - GPT의 최종 응답 텍스트
+ * @returns {Promise<{text: string, usedSearch: boolean, sources: Array<{title?: string, url: string}>}>}
  */
 export async function callGPT(apiKey, systemPrompt, history, options = {}) {
   if (!apiKey) {
@@ -73,6 +73,9 @@ export async function callGPT(apiKey, systemPrompt, history, options = {}) {
 async function runToolLoop({ model, apiKey, messages, tools, tavilyKey, onRetry }) {
   // messages는 이 함수 내에서만 계속 push하므로 원본 보호를 위해 얕은 복사
   const workingMessages = [...messages];
+  // 검색 사용 여부 및 누적 소스
+  let usedSearch = false;
+  const collectedSources = [];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     // 라운드별 독립 withRetry — 재시도 시 앞서 쌓인 tool 결과가 날아가지 않음
@@ -94,7 +97,11 @@ async function runToolLoop({ model, apiKey, messages, tools, tavilyKey, onRetry 
       if (!text) {
         throw new Error('OpenAI 응답이 비어 있습니다.');
       }
-      return text;
+      return {
+        text,
+        usedSearch,
+        sources: dedupeSources(collectedSources).slice(0, 5),
+      };
     }
 
     // 3b) tool_calls 있으면: assistant 메시지 + 각 호출 실행 결과 push
@@ -105,11 +112,17 @@ async function runToolLoop({ model, apiKey, messages, tools, tavilyKey, onRetry 
     });
 
     for (const tc of toolCalls) {
-      const result = await executeToolCall(tc, tavilyKey);
+      const { content, sources } = await executeToolCall(tc, tavilyKey);
+      if (tc?.function?.name === 'web_search') {
+        usedSearch = true;
+      }
+      if (sources?.length) {
+        collectedSources.push(...sources);
+      }
       workingMessages.push({
         role: 'tool',
         tool_call_id: tc.id,
-        content: result,
+        content,
       });
     }
     // 다음 라운드로
@@ -125,11 +138,40 @@ async function executeToolCall(toolCall, tavilyKey) {
     try {
       args = JSON.parse(toolCall.function.arguments || '{}');
     } catch {
-      return JSON.stringify({ error: '인자 파싱 실패' });
+      return { content: JSON.stringify({ error: '인자 파싱 실패' }), sources: [] };
     }
-    return tavilySearch(tavilyKey, args.query || '');
+    const content = await tavilySearch(tavilyKey, args.query || '');
+    // Tavily 결과에서 {title, url} 뽑아내기 (실패/에러는 무시)
+    const sources = extractSourcesFromTavily(content);
+    return { content, sources };
   }
-  return JSON.stringify({ error: `알 수 없는 도구: ${name}` });
+  return {
+    content: JSON.stringify({ error: `알 수 없는 도구: ${name}` }),
+    sources: [],
+  };
+}
+
+function extractSourcesFromTavily(jsonStr) {
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (!parsed || !Array.isArray(parsed.results)) return [];
+    return parsed.results
+      .filter((r) => r && r.url)
+      .map((r) => ({ title: r.title || undefined, url: r.url }));
+  } catch {
+    return [];
+  }
+}
+
+function dedupeSources(sources) {
+  const seen = new Set();
+  const out = [];
+  for (const s of sources) {
+    if (!s?.url || seen.has(s.url)) continue;
+    seen.add(s.url);
+    out.push(s);
+  }
+  return out;
 }
 
 function buildTools() {
