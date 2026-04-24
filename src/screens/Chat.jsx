@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { callGPT } from '../services/openai.js';
 import { callGemini } from '../services/gemini.js';
 import { buildSystemPrompt, modeTitle } from '../config/modes.js';
+import { loadKeys } from './Setup.jsx';
 import { historyStore } from '../services/historyStore.js';
 
 // 사용자 → GPT → Gemini 순차 진행. GPT 답변 후 Gemini 호출 전 대기 시간.
@@ -77,6 +78,12 @@ export default function Chat({ config, onBack }) {
     const text = input.trim();
     if (!text || busy) return;
 
+    const { openai, gemini, tavily } = loadKeys();
+    if (!openai || !gemini) {
+      alert('API 키가 설정되어 있지 않습니다. 먼저 API 키를 입력해주세요.');
+      return;
+    }
+
     // 1) 사용자 메시지 추가
     const userMsg = { speaker: 'user', text };
     setMessages((prev) => [...prev, userMsg]);
@@ -90,8 +97,9 @@ export default function Chat({ config, onBack }) {
       const historyForGpt = [...messagesRef.current, userMsg];
       let gptText;
       try {
-        gptText = await callGPT(gptSys, historyForGpt, {
+        gptText = await callGPT(openai, gptSys, historyForGpt, {
           onRetry: makeRetryHandler('gpt'),
+          tavilyKey: tavily || null,
         });
       } finally {
         clearRetryStatus('gpt');
@@ -108,7 +116,7 @@ export default function Chat({ config, onBack }) {
       const historyForGemini = messagesRef.current;
       let geminiText;
       try {
-        geminiText = await callGemini(geminiSys, historyForGemini, {
+        geminiText = await callGemini(gemini, geminiSys, historyForGemini, {
           onRetry: makeRetryHandler('gemini'),
         });
       } finally {
