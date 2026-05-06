@@ -7,7 +7,8 @@
 import { withRetry } from './retry.js';
 import { tavilySearch } from './tavily.js';
 
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+// Vercel 배포 시(VITE_USE_PROXY=true) 서버리스 프록시를 사용해 모바일 CORS 문제 우회
+const USE_PROXY = import.meta.env.VITE_USE_PROXY === 'true';
 const MODEL_FALLBACK_CHAIN = ['gpt-4.1-mini', 'gpt-4o-mini'];
 const MAX_TOKENS = 400;
 const MAX_TOOL_ROUNDS = 3; // tool_call 무한 루프 가드
@@ -201,24 +202,27 @@ function buildTools() {
 // 하위 API 호출 (원본 응답 반환)
 // ─────────────────────────────────────────────────────────────
 async function doRequestRaw(model, apiKey, messages, tools) {
-  const body = {
-    model,
-    messages,
-    max_tokens: MAX_TOKENS,
-  };
+  const body = { model, messages, max_tokens: MAX_TOKENS };
   if (tools) {
     body.tools = tools;
     body.tool_choice = 'auto';
   }
 
+  let url, headers;
+  if (USE_PROXY) {
+    url = '/api/openai';
+    headers = { 'Content-Type': 'application/json' };
+    body.apiKey = apiKey; // 프록시 함수에서 꺼내서 Authorization 헤더로 전달
+  } else {
+    url = 'https://api.openai.com/v1/chat/completions';
+    headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` };
+  }
+
   let response;
   try {
-    response = await fetch(OPENAI_URL, {
+    response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers,
       body: JSON.stringify(body),
     });
   } catch (networkErr) {

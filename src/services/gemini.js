@@ -7,6 +7,8 @@
 
 import { withRetry } from './retry.js';
 
+// Vercel 배포 시(VITE_USE_PROXY=true) 서버리스 프록시를 사용해 모바일 CORS 문제 우회
+const USE_PROXY = import.meta.env.VITE_USE_PROXY === 'true';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const MODEL_FALLBACK_CHAIN = [
   'gemini-2.5-flash-lite',
@@ -86,14 +88,21 @@ function buildBody(model, systemPrompt, contents) {
 }
 
 async function callGeminiModel(model, apiKey, body) {
-  const url = `${GEMINI_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  let url, fetchBody;
+  if (USE_PROXY) {
+    url = '/api/gemini';
+    fetchBody = JSON.stringify({ apiKey, model, ...body }); // 프록시 함수에서 apiKey/model 꺼낸 뒤 Gemini로 전달
+  } else {
+    url = `${GEMINI_BASE}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    fetchBody = JSON.stringify(body);
+  }
 
   let response;
   try {
     response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: fetchBody,
     });
   } catch (networkErr) {
     throw new Error(`네트워크 오류: ${networkErr.message}`);
