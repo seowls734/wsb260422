@@ -7,8 +7,8 @@
 import { withRetry } from './retry.js';
 import { tavilySearch } from './tavily.js';
 
-// Vercel 배포 시(VITE_USE_PROXY=true) 서버리스 프록시를 사용해 모바일 CORS 문제 우회
-const USE_PROXY = import.meta.env.VITE_USE_PROXY === 'true';
+// 프로덕션 빌드에서는 Vercel 서버리스 프록시 경유 (모바일 CORS 문제 우회)
+const USE_PROXY = import.meta.env.PROD;
 const MODEL_FALLBACK_CHAIN = ['gpt-4.1-mini', 'gpt-4o-mini'];
 const MAX_TOKENS = 400;
 const MAX_TOOL_ROUNDS = 3; // tool_call 무한 루프 가드

@@ -7,8 +7,8 @@
 
 import { withRetry } from './retry.js';
 
-// Vercel 배포 시(VITE_USE_PROXY=true) 서버리스 프록시를 사용해 모바일 CORS 문제 우회
-const USE_PROXY = import.meta.env.VITE_USE_PROXY === 'true';
+// 프로덕션 빌드에서는 Vercel 서버리스 프록시 경유 (모바일 CORS 문제 우회)
+const USE_PROXY = import.meta.env.PROD;
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const MODEL_FALLBACK_CHAIN = [
   'gemini-2.5-flash-lite',
