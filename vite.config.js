@@ -6,9 +6,14 @@ import { VitePWA } from 'vite-plugin-pwa';
 // - vite-plugin-pwa가 manifest.webmanifest와 service worker를 자동 생성합니다.
 // - registerType: 'autoUpdate' → 새 버전 감지 시 자동으로 SW 업데이트.
 const base = process.env.BASE_PATH || '/';
+// Vercel 빌드에서만 VERCEL=1 환경변수가 자동으로 설정됨.
+// GitHub Pages·로컬 dev에서는 false → 직접 호출, Vercel에서는 true → 프록시 경유.
+const isVercel = process.env.VERCEL === '1';
 
 export default defineConfig({
   base,
+  // __VERCEL__ 는 빌드 시 true/false 리터럴로 치환됩니다.
+  define: { __VERCEL__: isVercel },
   plugins: [
     react(),
     VitePWA({

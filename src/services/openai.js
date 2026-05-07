@@ -7,8 +7,10 @@
 import { withRetry } from './retry.js';
 import { tavilySearch } from './tavily.js';
 
-// 프로덕션 빌드에서는 Vercel 서버리스 프록시 경유 (모바일 CORS 문제 우회)
-const USE_PROXY = import.meta.env.PROD;
+// Vercel 빌드에서만 서버리스 프록시 경유 (모바일 CORS 문제 우회).
+// __VERCEL__ 은 vite.config.js의 define 옵션으로 주입됩니다.
+/* global __VERCEL__ */
+const USE_PROXY = __VERCEL__;
 const MODEL_FALLBACK_CHAIN = ['gpt-4.1-mini', 'gpt-4o-mini'];
 const MAX_TOKENS = 400;
 const MAX_TOOL_ROUNDS = 3; // tool_call 무한 루프 가드
