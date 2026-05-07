@@ -3,9 +3,11 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "functions": {
+    "api/openai.js": { "maxDuration": 10 },
+    "api/gemini.js": { "maxDuration": 10 }
+  },
   "rewrites": [
-    { "source": "/api/openai", "destination": "/api/openai" },
-    { "source": "/api/gemini", "destination": "/api/gemini" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
